@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=1920, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Home</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="backdrop" aria-hidden="true">
+      <div class="glow glow-blue"></div>
+      <div class="glow glow-slate"></div>
+      <div class="grain"></div>
+    </div>
+
+    <main class="shell">
+      <header class="masthead">
+        <div class="time-block">
+          <p id="time" class="time">--:--</p>
+          <p id="date" class="date">Loading</p>
+        </div>
+      </header>
+
+      <section class="tile-row hero-row" aria-label="Sources">
+        <button class="tile hero live" data-id="live-tv" data-action="source" data-source="TV" data-number="1">
+          <span class="tile-kicker">WATCH</span>
+          <span class="tile-title">Live TV</span>
+          <span class="tile-detail">Your pruned channel lineup</span>
+          <span class="tile-symbol" aria-hidden="true">LIVE</span>
+        </button>
+        <button class="tile hero ps5" data-id="ps5" data-action="source" data-source="HDMI" data-number="2">
+          <span class="tile-kicker">PLAY</span>
+          <span class="tile-title">PlayStation 5</span>
+          <span class="tile-detail">HDMI 2 · ARC stays active</span>
+          <span class="tile-symbol controller" aria-hidden="true">◇</span>
+        </button>
+      </section>
+
+      <section class="streaming" aria-labelledby="streaming-title">
+        <div class="section-heading">
+          <h2 id="streaming-title">Streaming</h2>
+          <p>Only the apps you kept</p>
+        </div>
+        <div class="tile-row app-row primary-apps">
+          <button class="tile app netflix" data-id="netflix" data-action="app"><span class="app-monogram">N</span><span class="app-name">Netflix</span></button>
+          <button class="tile app youtube" data-id="youtube" data-action="app"><span class="app-monogram">▶</span><span class="app-name">YouTube</span></button>
+          <button class="tile app prime" data-id="prime-video" data-action="app"><span class="app-monogram">prime</span><span class="app-name">Prime Video</span></button>
+          <button class="tile app apple" data-id="apple-tv" data-action="app"><span class="app-monogram">tv+</span><span class="app-name">Apple TV</span></button>
+          <button class="tile app disney" data-id="disney-plus" data-action="app"><span class="app-monogram">D+</span><span class="app-name">Disney+</span></button>
+        </div>
+        <div class="tile-row app-row secondary-apps">
+          <button class="tile app peacock" data-id="peacock" data-action="app"><span class="app-monogram">P</span><span class="app-name">Peacock</span></button>
+          <button class="tile app max" data-id="max" data-action="app"><span class="app-monogram">max</span><span class="app-name">Max</span></button>
+          <button class="tile app paramount" data-id="paramount-plus" data-action="app"><span class="app-monogram">P+</span><span class="app-name">Paramount+</span></button>
+          <button class="tile app youtubetv" data-id="youtube-tv" data-action="app"><span class="app-monogram">▶</span><span class="app-name">YouTube TV</span></button>
+        </div>
+      </section>
+
+      <footer>
+        <p><span class="key">← ↑ ↓ →</span> move</p>
+        <p><span class="key">OK</span> open</p>
+        <p><span class="key">BACK</span> exit</p>
+        <p id="status" class="status" aria-live="polite">Ready.</p>
+      </footer>
+    </main>
+
+    <script src="navigation.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

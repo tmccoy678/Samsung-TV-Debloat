@@ -1,0 +1,12 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Device-specific and vendor material stays local.
+/artifacts/
+/build/
+/firmware/
+/on-tv-guard/rootfs-patch/

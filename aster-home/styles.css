@@ -1,0 +1,307 @@
+:root {
+  --ink: #edf3f8;
+  --muted: #9eafbf;
+  --panel: rgba(27, 40, 53, 0.92);
+  --panel-light: rgba(47, 67, 84, 0.96);
+  --line: rgba(168, 190, 208, 0.16);
+  --focus: #91c7e4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #101821;
+  color: var(--ink);
+  font-family: "SamsungOne", "Helvetica Neue", Arial, sans-serif;
+}
+
+body {
+  position: relative;
+}
+
+button {
+  font: inherit;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 34% -8%, rgba(79, 130, 161, 0.2) 0, rgba(79, 130, 161, 0) 42%),
+    radial-gradient(circle at 108% 112%, rgba(113, 136, 154, 0.14) 0, rgba(113, 136, 154, 0) 44%),
+    linear-gradient(145deg, #101821 0%, #192634 52%, #111a24 100%);
+}
+
+.glow {
+  display: none;
+}
+
+.grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.22;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.016) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px);
+  background-size: 5px 5px;
+}
+
+.shell {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  padding: 56px 72px 42px;
+  display: flex;
+  flex-direction: column;
+}
+
+.masthead,
+.tile-row,
+.section-heading,
+footer {
+  display: flex;
+  align-items: center;
+}
+
+.masthead {
+  min-height: 68px;
+  justify-content: flex-end;
+}
+
+h2,
+p {
+  margin-top: 0;
+}
+
+.time-block {
+  text-align: right;
+}
+
+.time {
+  margin-bottom: 2px;
+  font-size: 38px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.date {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.hero-row {
+  margin-top: 38px;
+}
+
+.tile-row {
+  gap: 18px;
+}
+
+.tile {
+  position: relative;
+  overflow: hidden;
+  border: 2px solid var(--line);
+  border-radius: 24px;
+  color: var(--ink);
+  background: linear-gradient(145deg, rgba(39, 56, 72, 0.95), var(--panel));
+  text-align: left;
+  outline: none;
+  box-shadow: 0 15px 45px rgba(0, 0, 0, 0.2);
+  transform: scale(1);
+  transition: transform 110ms ease, border-color 110ms ease, box-shadow 110ms ease, background 110ms ease;
+}
+
+.tile.is-focused {
+  z-index: 3;
+  transform: scale(1.045);
+  border-color: var(--focus);
+  background: var(--panel-light);
+  box-shadow: 0 0 0 4px rgba(145, 199, 228, 0.18), 0 22px 55px rgba(0, 0, 0, 0.42);
+}
+
+.hero {
+  width: calc(50% - 9px);
+  height: 184px;
+  padding: 27px 32px;
+}
+
+.hero::after {
+  content: "";
+  position: absolute;
+  right: -90px;
+  bottom: -170px;
+  width: 380px;
+  height: 380px;
+  border-radius: 50%;
+  opacity: 0.26;
+}
+
+.live::after { background: #4d7f9d; }
+.ps5::after { background: #647d91; }
+
+.tile-kicker,
+.tile-title,
+.tile-detail,
+.tile-symbol,
+.app-monogram,
+.app-name {
+  display: block;
+}
+
+.tile-kicker {
+  color: var(--focus);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+}
+
+.tile-title {
+  margin-top: 10px;
+  font-size: 36px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+
+.tile-detail {
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 17px;
+}
+
+.tile-symbol {
+  position: absolute;
+  z-index: 1;
+  right: 34px;
+  bottom: 28px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.tile-symbol.controller {
+  font-size: 50px;
+  font-weight: 300;
+}
+
+.streaming {
+  margin-top: 34px;
+}
+
+.section-heading {
+  justify-content: space-between;
+  margin-bottom: 13px;
+}
+
+.section-heading h2 {
+  margin-bottom: 0;
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.section-heading p {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.app-row + .app-row {
+  margin-top: 15px;
+}
+
+.app {
+  flex: 1 1 0;
+  height: 124px;
+  min-width: 0;
+  padding: 21px 22px;
+}
+
+.app-monogram {
+  width: 54px;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(183, 213, 231, 0.24);
+  border-radius: 16px;
+  color: #dce8f1;
+  background: linear-gradient(145deg, rgba(111, 151, 178, 0.5), rgba(28, 44, 58, 0.8));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13), 0 8px 20px rgba(0, 0, 0, 0.2);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.app-name {
+  position: absolute;
+  left: 22px;
+  bottom: 13px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.netflix { background: linear-gradient(140deg, #344a5b, #192631); }
+.netflix .app-monogram { background: linear-gradient(145deg, #7897ac, #344b5d); }
+.youtube,
+.youtubetv { background: linear-gradient(140deg, #30485b, #182631); }
+.youtube .app-monogram,
+.youtubetv .app-monogram { background: linear-gradient(145deg, #75a6c2, #2d536c); }
+.prime { background: linear-gradient(140deg, #2a4b62, #172735); }
+.prime .app-monogram { color: #e2f1f8; background: linear-gradient(145deg, #5f9fc5, #28506b); font-size: 18px; }
+.apple { background: linear-gradient(140deg, #3a4855, #1b252e); }
+.apple .app-monogram { background: linear-gradient(145deg, #899ba8, #3b4e5c); }
+.disney { background: linear-gradient(140deg, #29465e, #172635); }
+.disney .app-monogram { background: linear-gradient(145deg, #668eae, #294b68); }
+.peacock { background: linear-gradient(140deg, #3b4b5b, #1b2833); }
+.peacock .app-monogram { background: linear-gradient(145deg, #7f9bad, #394e5d); }
+.max { background: linear-gradient(140deg, #354a61, #19293a); }
+.max .app-monogram { background: linear-gradient(145deg, #708ca9, #344f6d); font-size: 19px; }
+.paramount { background: linear-gradient(140deg, #2c5069, #182a38); }
+.paramount .app-monogram { background: linear-gradient(145deg, #68a0bf, #2b5974); }
+
+footer {
+  margin-top: auto;
+  gap: 25px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+footer p {
+  margin-bottom: 0;
+}
+
+.key {
+  margin-right: 5px;
+  color: #dce7f3;
+  font-weight: 750;
+}
+
+.status {
+  margin-left: auto;
+  color: #c6d5e3;
+}
+
+.status.error {
+  color: #ffb4b4;
+}
+
+@media (max-width: 1280px) {
+  .shell { padding: 34px 48px 30px; }
+  .hero-row { margin-top: 24px; }
+  .hero { height: 150px; }
+  .app { height: 112px; padding: 15px 18px; }
+  .app-monogram { width: 48px; height: 48px; border-radius: 14px; font-size: 20px; }
+  .app-name { left: 18px; bottom: 10px; font-size: 13px; }
+  .prime .app-monogram,
+  .max .app-monogram { font-size: 16px; }
+  .streaming { margin-top: 23px; }
+}

@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""Small SDB CLI compatibility shim backed by sdb_direct.py."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from sdb_direct import pull, push  # noqa: E402
+
+
+DEFAULT_HOST = os.environ.get("DAYBREAK_TV_HOST", "192.0.2.1")
+HELPER = str(Path(__file__).resolve().with_name("sdb_direct.py"))
+
+
+def host_from_serial(serial: str | None) -> str:
+    return (serial or DEFAULT_HOST).split(":", 1)[0]
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    serial = None
+    if len(args) >= 2 and args[0] == "-s":
+        serial = args[1]
+        args = args[2:]
+    if not args:
+        return 2
+    action, rest = args[0], args[1:]
+    if action == "connect":
+        target = rest[0] if rest else f"{DEFAULT_HOST}:26101"
+        print(f"connected to {target}")
+        return 0
+    if action == "disconnect":
+        return 0
+    if action == "devices":
+        print("List of devices attached")
+        print(f"{DEFAULT_HOST}:26101\tdevice\tUN65TU7000BXZA")
+        return 0
+    host = host_from_serial(serial)
+    if action == "push" and len(rest) == 2:
+        push(host, Path(rest[0]), rest[1])
+        return 0
+    if action == "pull" and len(rest) == 2:
+        pull(host, rest[0], Path(rest[1]))
+        return 0
+    if action == "shell" and rest:
+        command = " ".join(rest)
+        if command.startswith("0 "):
+            command = command[2:]
+        completed = subprocess.run(
+            [HELPER, "--host", host, "shell", command], check=False
+        )
+        return completed.returncode
+    print(f"unsupported sdb shim action: {action}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
