@@ -1,5 +1,21 @@
 # Samsung TV Debloat
 
+This repo provides insight into the debloat of my Samsung TU7000 TV. I use the TV for regular streaming apps, the native Samsung TV live-channels, and for gaming with a PS5. I do not claim that this repo will be a perfect fit for people who use their Samsung TV for anything other than those purposes. However, I do recommend TizenBrew on the Samsung TV as it has provided a clean and fast UI. 
+
+This work was assisted by an excellent OpenAI Cyber model. I claim responsibility for the writing published in this repository. If you have questions, or would like to discuss code review, please email me at: tmccoy678@gmail.com. 
+
+Conclusively, I accept no responsibility if you brick your TV in this process. Some of your agents are crazy, and some of your global.md instructions are bad. 
+
+Please revise your local instructions and agent capabilities prior to beginning this project. 
+
+Allow yourself and your agent at least three hours to complete the Debloat. 
+
+Thank you, 
+
+Taylor 
+
+INTRODUCTION: 
+
 Samsung TV Debloat preserves the working result of a hardware-specific Samsung TU7000/Tizen cleanup. It combines a TV-local enforcement guard, a small local launcher, on-demand Mac control tools, rollback-aware checks, and tests for the behaviors that matter on the physical television.
 
 The original installation removed unwanted recommendations, advertising and recognition services, unused applications, stale launcher records, and background components while retaining streaming applications, Samsung TV Plus playback, HDMI-CEC, AirPlay/casting, the Samsung remote API, web applications, and HDMI ARC audio.
