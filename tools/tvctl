@@ -5,24 +5,19 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shlex
 import subprocess
 import sys
 from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
-TV_HOST = os.environ.get("DAYBREAK_TV_HOST", "192.0.2.1")
-ROOT_REPOSITORY = Path(
-    os.environ.get(
-        "SAMSUNG_TV_ROOT_REPOSITORY",
-        str(PROJECT.parent.parent / "tools" / "samsung-tv-root"),
-    )
-)
-ROOT_TOOL = ROOT_REPOSITORY / ".venv/bin/samsung-tv-root"
-ROOT_SOURCE = ROOT_REPOSITORY / "src"
+sys.path.insert(0, str(PROJECT / "tools"))
+from runtime_config import root_executable, tv_host  # noqa: E402
+from sdb_direct import SDB as DirectSDB  # noqa: E402
+
+TV_HOST = tv_host()
+ROOT_TOOL = root_executable(PROJECT)
 SDB = PROJECT / "tools/sdb"
-PAYLOADS = PROJECT / "build/archive-root31/out"
 REMOTE = PROJECT / "tools/samsung_remote.py"
 
 
@@ -34,16 +29,15 @@ def compose_remote_command(arguments: list[str]) -> str:
 
 
 def sdb_capture(command: str, timeout: float = 30) -> str:
-    sys.path.insert(0, str(ROOT_SOURCE))
-    from samsung_tv_root.sdb import SdbClient
-
-    client = SdbClient(SDB, TV_HOST, timeout=12)
-    client.connect()
-    client.require_device()
-    result = client.capture(command, timeout=timeout)
-    if "\n[exit:0]" not in result.output:
-        raise RuntimeError(result.output.strip())
-    return result.output.split("\n[exit:0]", 1)[0].rstrip()
+    client = DirectSDB(TV_HOST, timeout=timeout)
+    try:
+        client.open_stream(f"shell:0 {command}")
+        output = client.read_stream().decode("utf-8", "replace")
+    finally:
+        client.close()
+    if "\n[exit:0]" not in output:
+        raise RuntimeError(output.strip())
+    return output.split("\n[exit:0]", 1)[0].rstrip()
 
 
 def run_root(command: str, command_timeout: int = 180) -> int:
@@ -56,8 +50,6 @@ def run_root(command: str, command_timeout: int = 180) -> int:
         "archive-root",
         "root",
         TV_HOST,
-        "--payload-directory",
-        str(PAYLOADS),
         "--accept-timeout",
         "30",
         "--command-timeout",
@@ -67,7 +59,7 @@ def run_root(command: str, command_timeout: int = 180) -> int:
     ]
     completed = subprocess.run(
         arguments,
-        cwd=ROOT_REPOSITORY,
+        cwd=PROJECT,
         capture_output=True,
         text=True,
         timeout=command_timeout + 90,

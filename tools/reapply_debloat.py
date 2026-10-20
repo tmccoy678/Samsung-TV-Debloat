@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import fcntl
 import json
-import os
 import socket
 import subprocess
 import sys
@@ -14,16 +13,13 @@ from pathlib import Path
 
 
 PROJECT = Path(__file__).resolve().parents[1]
-TV_HOST = os.environ.get("DAYBREAK_TV_HOST", "192.0.2.1")
-ROOT_REPOSITORY = Path(
-    os.environ.get(
-        "SAMSUNG_TV_ROOT_REPOSITORY",
-        str(PROJECT.parent.parent / "tools" / "samsung-tv-root"),
-    )
-)
-ROOT_TOOL = ROOT_REPOSITORY / ".venv/bin/samsung-tv-root"
+sys.path.insert(0, str(PROJECT / "tools"))
+from runtime_config import root_executable, tv_host  # noqa: E402
+from sdb_direct import SDB as DirectSDB  # noqa: E402
+
+TV_HOST = tv_host()
+ROOT_TOOL = root_executable(PROJECT)
 SDB = PROJECT / "tools/sdb"
-PAYLOADS = PROJECT / "build/archive-root31/out"
 STATE_DIR = Path.home() / "Library/Application Support/DaybreakSamsungTV"
 STATE_FILE = STATE_DIR / "debloat-state.json"
 LOCK_FILE = STATE_DIR / "debloat.lock"
@@ -46,17 +42,16 @@ def tv_reachable() -> bool:
 
 
 def tv_boot_id() -> str:
-    sys.path.insert(0, str(ROOT_REPOSITORY / "src"))
-    from samsung_tv_root.sdb import SdbClient
-
-    client = SdbClient(SDB, TV_HOST, timeout=8)
-    client.connect()
-    client.require_device()
-    result = client.capture("cat /proc/sys/kernel/random/boot_id", timeout=10)
+    client = DirectSDB(TV_HOST, timeout=10)
+    try:
+        client.open_stream("shell:0 cat /proc/sys/kernel/random/boot_id")
+        output = client.read_stream().decode("utf-8", "replace")
+    finally:
+        client.close()
     marker = "\n[exit:0]"
-    if marker not in result.output:
+    if marker not in output:
         raise RuntimeError("TV boot ID command failed")
-    boot_id = result.output.split(marker, 1)[0].strip()
+    boot_id = output.split(marker, 1)[0].strip()
     if len(boot_id) != 36:
         raise RuntimeError("TV returned an invalid boot ID")
     return boot_id
@@ -91,8 +86,6 @@ def reapply() -> None:
         "archive-root",
         "root",
         TV_HOST,
-        "--payload-directory",
-        str(PAYLOADS),
         "--accept-timeout",
         "30",
         "--command-timeout",
@@ -102,12 +95,13 @@ def reapply() -> None:
     ]
     completed = subprocess.run(
         command,
-        cwd=ROOT_TOOL.parent.parent,
+        cwd=PROJECT,
         capture_output=True,
         text=True,
         timeout=120,
         check=False,
     )
+    LAST_RESULT.parent.mkdir(parents=True, exist_ok=True)
     LAST_RESULT.write_text(completed.stdout, encoding="utf-8")
     if completed.returncode != 0:
         raise RuntimeError(

@@ -13,9 +13,14 @@ import ssl
 import struct
 import subprocess
 import time
+import sys
+from pathlib import Path
 from urllib.parse import quote
 
-TV_HOST = os.environ.get("DAYBREAK_TV_HOST", "192.0.2.1")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from runtime_config import tv_host  # noqa: E402
+
+TV_HOST = tv_host()
 CLIENT_NAME = "Daybreak TV Control"
 KEYCHAIN_ACCOUNT = CLIENT_NAME
 KEYCHAIN_SERVICE = os.environ.get(
