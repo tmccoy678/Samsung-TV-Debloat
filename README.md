@@ -55,6 +55,6 @@ The retained test corpus covers the current source without contacting a televisi
 
 The local TU7000 installation reached a successful TV-local two-pass cleanup with its Mac guard disabled. Later channel-policy drift exposed an important failure mode: a strict cache mismatch can cause repeated Smart Hub restarts unless the second pass exits without restarting. The checked-in guard contains that correction. Current physical-device state must be inspected before treating the historical installation result as live.
 
-Created by Taylor McCoy with Aster and other OpenAI Codex agents.
-
-This private repository has no public license yet. Licensing and removal of any remaining model-specific material should be decided before public release.
+Created by Taylor McCoy with Aster and other OpenAI Codex agents. Original
+project code is available under the [MIT License](LICENSE); third-party software,
+firmware, trademarks, and installed packages retain their own terms.
