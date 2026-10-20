@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+.tools/
 
 # Device-specific and vendor material stays local.
 /artifacts/

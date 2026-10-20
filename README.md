@@ -4,6 +4,22 @@ Samsung TV Debloat preserves the working result of a hardware-specific Samsung T
 
 The original installation removed unwanted recommendations, advertising and recognition services, unused applications, stale launcher records, and background components while retaining streaming applications, Samsung TV Plus playback, HDMI-CEC, AirPlay/casting, the Samsung remote API, web applications, and HDMI ARC audio.
 
+## Install
+
+The guided installer performs the supported cleanup, creates recovery backups,
+installs the TV-local guard, and saves the private connection settings used by
+the maintenance tools:
+
+```sh
+./install --check
+./install
+```
+
+It accepts only the exact model, firmware build, and filesystem block verified
+in the original installation. Read [Installation](docs/INSTALLATION.md),
+[Compatibility](docs/COMPATIBILITY.md), and [Recovery](docs/RECOVERY.md) before
+running it.
+
 ## What is here
 
 - `on-tv-guard/`: the two-pass boot guard, Home-layout policy, and TV Plus channel policy.
@@ -12,25 +28,37 @@ The original installation removed unwanted recommendations, advertising and reco
 - `tests/`: behavior tests for boot persistence, enforcement, remote-token handling, command quoting, and the launcher.
 - `SPEC.md`: the acceptance contract used for the completed TU7000 installation.
 - `docs/CASE_STUDY.md`: verified outcomes, reversibility decisions, and unresolved hardware-specific limits.
+- `docs/INSTALLATION.md`: the guided installation and its safety gates.
+- `docs/COMPATIBILITY.md`: the one hardware and firmware profile currently accepted.
+- `docs/RECOVERY.md`: backup locations and recovery procedures.
 
 ## Scope
 
 This repository documents one `UN65TU7000BXZA` running the observed 2026 Tizen firmware. Samsung package IDs, service names, database layouts, Smack labels, boot paths, and signed-package behavior differ across models and firmware revisions. The scripts are an auditable case study and engineering base, not a universal one-click debloater.
 
-Raw firmware, captured databases, device receipts, authorization tokens, root payloads, and machine-specific filesystem blocks are deliberately excluded. The Samsung remote token is retained in macOS Keychain by `tools/samsung_remote.py` and is never printed or stored in the repository.
+Samsung firmware, captured databases, device receipts, authorization tokens,
+and machine-specific filesystem blocks are deliberately excluded. The small
+public-domain root transport and its source are included under `vendor/` so the
+installer is self-contained. The Samsung remote token is retained in macOS
+Keychain by `tools/samsung_remote.py` and is never printed or stored in the
+repository.
 
-## Configuration
+## Maintenance after installation
 
-Set the television address before using a control tool:
+The installer saves the television address and pinned root-tool path in a
+private local configuration file. An environment variable can temporarily
+select another address:
 
 ```sh
 export DAYBREAK_TV_HOST=192.0.2.10
 ```
 
-`192.0.2.10` is documentation syntax; replace it with the television's LAN address. Root-assisted commands also require the separately installed `samsung-tv-root` project. Its location can be supplied without editing this repository:
+`192.0.2.10` is documentation syntax; replace it with the television's LAN
+address. The downloaded root executable can also be overridden without editing
+the repository:
 
 ```sh
-export SAMSUNG_TV_ROOT_REPOSITORY=/path/to/samsung-tv-root
+export SAMSUNG_TV_ROOT_EXECUTABLE=/path/to/samsung-tv-root
 ```
 
 The ordinary on-demand controller starts no background service:
@@ -55,6 +83,6 @@ The retained test corpus covers the current source without contacting a televisi
 
 The local TU7000 installation reached a successful TV-local two-pass cleanup with its Mac guard disabled. Later channel-policy drift exposed an important failure mode: a strict cache mismatch can cause repeated Smart Hub restarts unless the second pass exits without restarting. The checked-in guard contains that correction. Current physical-device state must be inspected before treating the historical installation result as live.
 
-Created by Taylor McCoy with Aster and other OpenAI Codex agents.
-
-This private repository has no public license yet. Licensing and removal of any remaining model-specific material should be decided before public release.
+Created by Taylor McCoy with Aster and other OpenAI Codex agents. Original
+project code is available under the [MIT License](LICENSE); third-party software,
+firmware, trademarks, and installed packages retain their own terms.

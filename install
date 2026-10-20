@@ -1,0 +1,548 @@
+#!/usr/bin/env python3
+"""Guided installer for the tested Samsung TU7000 debloat profile."""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import ipaddress
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import webbrowser
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+PROJECT = Path(__file__).resolve().parent
+CONFIG_PATH = Path.home() / ".config/samsung-tv-debloat/config.json"
+LOCAL_BACKUP_ROOT = Path.home() / ".local/share/samsung-tv-debloat/backups"
+REMOTE_STAGE = "/home/owner/share/tmp/sdk_tools"
+REMOTE_GUARD = "/opt/usr/share/daybreak-tv-guard"
+TIZENBREW_INSTALLER_URL = "https://github.com/reisxd/TizenBrewInstaller/releases/latest"
+class SupportedProfile:
+    def __init__(
+        self,
+        model: str = "UN65TU7000BXZA",
+        firmware: str = "T-KSU2EAKUC-2301.1",
+        build: str = "T-KSU2EAKUC-REL-202511120507",
+        root_device: str = "/dev/mmcblk0p18",
+        block_size: int = 4096,
+        system_conf_block: int = 319848,
+        original_block_sha256: str = "d350d6e7ffb690481b60c2d6c7b77d5c1dd2860bc393714eab83abcead093a58",
+        patched_block_sha256: str = "76a2220eee2596adf6522eebe5f5a36a65f6ee96fc6732104d2b2d63cdc8bda2",
+    ) -> None:
+        self.model = model
+        self.firmware = firmware
+        self.build = build
+        self.root_device = root_device
+        self.block_size = block_size
+        self.system_conf_block = system_conf_block
+        self.original_block_sha256 = original_block_sha256
+        self.patched_block_sha256 = patched_block_sha256
+
+
+PROFILE = SupportedProfile()
+PERSISTENCE_OLD = (
+    b"#DefaultTimeoutAbortSec=\n"
+    b"#DefaultRestartSec=100ms\n"
+    b"#DefaultStartLimitIntervalSec=10s\n"
+    b"#DefaultStartLimitBurst=5"
+)
+PERSISTENCE_NEW = (
+    b'DefaultEnvironment="BASH_ENV=/opt/usr/share/daybreak-tv-guard/boot-hook.sh"\n'
+    b"#                                "
+)
+
+STAGED_FILES = {
+    "on-tv-guard/boot_hook.sh": "daybreak-boot-hook.sh",
+    "on-tv-guard/root_enforce.sh": "daybreak-root-enforce.sh",
+    "on-tv-guard/home-layout/FromSmarthubToFS.json": "daybreak-FromSmarthubToFS.json",
+    "on-tv-guard/home-layout/apps_recent_layer.json": "daybreak-apps_recent_layer.json",
+    "on-tv-guard/tvplus-channel-denylist.tsv": "daybreak-tvplus-channel-denylist.tsv",
+    "aster-home/index.html": "daybreak-aster-index.html",
+    "aster-home/styles.css": "daybreak-aster-styles.css",
+    "aster-home/app.js": "daybreak-aster-app.js",
+    "aster-home/navigation.js": "daybreak-aster-navigation.js",
+    "aster-home/config.xml": "daybreak-aster-config.xml",
+    "aster-home/launcher-icon.png": "daybreak-aster-launcher-icon.png",
+}
+
+ROOT_TRANSPORT = PROJECT / "tools/archive_root_cli.py"
+ROOT_TRANSPORT_VERSION = "0.0.8-tu7000.1"
+VENDORED_HASHES = {
+    "vendor/samsung-tv-root/payloads/common/SamsungTvArchiveRoot.dll": "9d4e81b5b193e525d3f9ac077c36ff10e60c78305753c5879bee7a9da7b95c1c",
+    "vendor/samsung-tv-root/payloads/common/SamsungTvRootAgent.dll": "1adbc48b9901d51dc9eb4aa5fa25d050a2c50f554f65e95725dc7d2343460754",
+    "vendor/samsung-tv-root/payloads/common31/SamsungTvArchiveRoot.dll": "d1a6fee1b3a87860cf5dbf957c7e58615103a54804d8ff760992264148c4ecd1",
+    "vendor/samsung-tv-root/payloads/common31/SamsungTvRootAgent.dll": "a37d19b17e18666307afe94a57f92e59d7bac62f453cecdba4164d72f375f959",
+}
+
+
+class InstallError(RuntimeError):
+    """A user-actionable installer failure."""
+
+
+def digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def validate_host(value: str) -> str:
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("TV address must be an IPv4 address") from error
+    if address.version != 4 or address.is_unspecified or address.is_multicast:
+        raise argparse.ArgumentTypeError("TV address must be a usable IPv4 address")
+    return str(address)
+
+
+def patch_persistence_block(original: bytes) -> bytes:
+    if len(original) != PROFILE.block_size:
+        raise InstallError("persistence block is not exactly 4096 bytes")
+    current = digest(original)
+    if current == PROFILE.patched_block_sha256:
+        return original
+    if current != PROFILE.original_block_sha256:
+        raise InstallError(f"unsupported persistence block SHA-256: {current}")
+    if original.count(PERSISTENCE_OLD) != 1:
+        raise InstallError("expected system.conf byte sequence is not unique")
+    patched = original.replace(PERSISTENCE_OLD, PERSISTENCE_NEW, 1)
+    if len(patched) != len(original) or digest(patched) != PROFILE.patched_block_sha256:
+        raise InstallError("constructed persistence block failed its pinned hash")
+    return patched
+
+
+def root_stdout(payload: dict[str, object]) -> str:
+    if not payload.get("authenticated") or payload.get("uid") != 0:
+        raise InstallError("the root session did not authenticate as UID 0")
+    if not payload.get("staging_cleaned") or not payload.get("system_files_unchanged"):
+        raise InstallError("the root transport failed its cleanup or system-file checks")
+    commands = payload.get("commands")
+    if not isinstance(commands, list) or len(commands) != 1:
+        raise InstallError("the root transport returned an unexpected command count")
+    command = commands[0]
+    if not isinstance(command, dict) or command.get("exit_code") != 0:
+        raise InstallError("the television command did not complete successfully")
+    return str(command.get("stdout") or "")
+
+
+class Installer:
+    def __init__(self, arguments: argparse.Namespace) -> None:
+        self.arguments = arguments
+        self.host = arguments.tv_host
+        self.sdb = PROJECT / "tools/sdb"
+        self.root_executable = (
+            arguments.root_executable.resolve()
+            if arguments.root_executable
+            else ROOT_TRANSPORT
+        )
+        self.environment = os.environ.copy()
+        if self.host:
+            self.environment["DAYBREAK_TV_HOST"] = self.host
+
+    def say(self, message: str) -> None:
+        print(f"  {message}")
+
+    def stage(self, number: int, total: int, title: str) -> None:
+        print(f"\n[{number}/{total}] {title}")
+
+    def run(
+        self,
+        command: list[str],
+        *,
+        capture: bool = False,
+        timeout: int = 300,
+    ) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                command,
+                cwd=PROJECT,
+                env=self.environment,
+                text=True,
+                capture_output=capture,
+                timeout=timeout,
+                check=True,
+            )
+        except subprocess.CalledProcessError as error:
+            detail = (error.stderr or error.stdout or "").strip()
+            raise InstallError(
+                f"command failed ({Path(command[0]).name}): {detail or error.returncode}"
+            ) from error
+        except subprocess.TimeoutExpired as error:
+            raise InstallError(f"command timed out: {Path(command[0]).name}") from error
+
+    def check_local(self) -> None:
+        if sys.version_info < (3, 9):
+            raise InstallError("Python 3.9 or newer is required")
+        missing = [name for name in STAGED_FILES if not (PROJECT / name).is_file()]
+        if missing:
+            raise InstallError("repository is incomplete: " + ", ".join(missing))
+        if not self.sdb.is_file():
+            raise InstallError("the bundled SDB transport is missing")
+        if not self.root_executable.is_file():
+            raise InstallError(f"the archive-root transport is missing: {self.root_executable}")
+        if not shutil.which("openssl"):
+            raise InstallError("OpenSSL is required for the authenticated root transport")
+        for relative, expected in VENDORED_HASHES.items():
+            path = PROJECT / relative
+            if not path.is_file():
+                raise InstallError(f"vendored root payload is missing: {relative}")
+            actual = digest(path.read_bytes())
+            if actual != expected:
+                raise InstallError(f"vendored root payload failed SHA-256: {relative}")
+
+    def show_plan(self) -> None:
+        print("Samsung TV Debloat installer plan")
+        for index, text in enumerate(
+            (
+                "verify the host and vendored root transport",
+                "connect to the TV through Developer Mode",
+                "verify the exact model and internal firmware build",
+                "verify the installed TizenBrew launcher base",
+                "create on-TV database and package backups",
+                "install the guard and local launcher assets",
+                "apply and verify the debloat policy",
+                "patch the single verified boot block and save both backups",
+                "write local configuration and request a controlled reboot",
+            ),
+            start=1,
+        ):
+            print(f"  {index}. {text}")
+
+    def obtain_host(self) -> None:
+        if self.host:
+            return
+        if self.arguments.yes:
+            raise InstallError("--yes requires --tv-host")
+        value = input("\nTV IPv4 address: ").strip()
+        self.host = validate_host(value)
+        self.environment["DAYBREAK_TV_HOST"] = self.host
+
+    def verify_root_transport(self) -> None:
+        completed = self.run(
+            [str(self.root_executable), "--help"], capture=True, timeout=30
+        )
+        if "archive-root" not in completed.stdout:
+            raise InstallError("root transport does not provide the archive-root route")
+
+    def root_json(self, command: str) -> dict[str, object]:
+        assert self.host is not None
+        completed = self.run(
+            [
+                str(self.root_executable),
+                "--output",
+                "json",
+                "--sdb",
+                str(self.sdb),
+                "archive-root",
+                "root",
+                self.host,
+                "--accept-timeout",
+                "30",
+                "--command-timeout",
+                "240",
+                "--command",
+                command,
+            ],
+            capture=True,
+            timeout=360,
+        )
+        try:
+            payload = json.loads(completed.stdout)
+        except json.JSONDecodeError as error:
+            raise InstallError("root tool returned invalid JSON") from error
+        if not isinstance(payload, dict):
+            raise InstallError("root tool returned an invalid result")
+        return payload
+
+    def root_command(self, command: str) -> str:
+        return root_stdout(self.root_json(command))
+
+    def verify_target(self) -> None:
+        assert self.host is not None
+        sys.path.insert(0, str(PROJECT / "tools"))
+        from sdb_direct import SDB
+
+        connection = SDB(self.host)
+        try:
+            banner = connection.banner
+        finally:
+            connection.close()
+        match = re.search(r"device::([^:]+)::", banner)
+        model = match.group(1) if match else ""
+        probe = self.run(
+            [
+                str(self.root_executable),
+                "--output",
+                "json",
+                "--sdb",
+                str(self.sdb),
+                "archive-root",
+                "probe",
+                self.host,
+            ],
+            capture=True,
+            timeout=180,
+        )
+        try:
+            probe_result = json.loads(probe.stdout)
+        except json.JSONDecodeError as error:
+            raise InstallError("root compatibility probe returned invalid JSON") from error
+        if not isinstance(probe_result, dict):
+            raise InstallError("root compatibility probe returned an invalid result")
+
+        details = self.root_command(
+            "printf 'MODEL='; vconftool get -t string db/info/model 2>/dev/null || true; "
+            "printf '\\n'; cat /etc/info.ini; "
+            "printf '\\nTIZENBREW='; test -d /opt/usr/apps/xvvl3S1bvH/res/wgt && echo present || echo absent"
+        )
+        build = ""
+        tizenbrew = ""
+        for line in details.splitlines():
+            if line.startswith("BUILD_ID="):
+                build = line.partition("=")[2].strip().strip('"')
+            elif line.startswith("TIZENBREW="):
+                tizenbrew = line.partition("=")[2].strip()
+        if model != PROFILE.model:
+            raise InstallError(f"unsupported TV model: {model or 'unknown'}")
+        if build != PROFILE.build:
+            raise InstallError(f"unsupported internal firmware build: {build or 'unknown'}")
+        if tizenbrew != "present":
+            if not self.arguments.yes:
+                self.say("The signed TizenBrew base must be installed once for Aster Home.")
+                webbrowser.open(TIZENBREW_INSTALLER_URL)
+                input("  Install TizenBrew with its official installer, then press Enter: ")
+                details = self.root_command(
+                    "test -d /opt/usr/apps/xvvl3S1bvH/res/wgt && echo present || echo absent"
+                )
+                tizenbrew = details.strip()
+            if tizenbrew != "present":
+                raise InstallError(
+                    "TizenBrew is missing; install it from " + TIZENBREW_INSTALLER_URL
+                )
+        self.say(f"Verified {PROFILE.model}, {PROFILE.firmware}, {PROFILE.build}.")
+
+    def push(self, source: Path, destination: str) -> None:
+        assert self.host is not None
+        self.run(
+            [str(self.sdb), "-s", f"{self.host}:26101", "push", str(source), destination],
+            capture=True,
+            timeout=120,
+        )
+
+    def create_backup(self) -> str:
+        packages = (
+            "yL49PNFmjW zigzSWa1hy 9FhM0cODbY jAfAs7yVDX 9TYrsHWbaB "
+            "HupEmjIB4I GHI3a0zMSx oKZtnuTBW8 LImG0QPABV 3KA0pm7a7V "
+            "kIciSQlYEM OK2Rdkjmsi LBUAQX1exg org.tizen.browser niYSnzL6h1 "
+            "Ob3XhAVMu6 com.samsung.tv.gallery"
+        )
+        command = f"""
+set -eu
+stamp=$(date +%Y%m%d-%H%M%S)
+backup=/opt/usr/home/owner/share/daybreak-backups/installer-$stamp
+mkdir -p "$backup"
+sqlite3 /opt/dbspace/.pkgmgr_parser.db ".backup $backup/pkgmgr.db"
+sqlite3 /opt/dbspace/.webappservice.db ".backup $backup/webapp.db"
+set --
+for package in {packages}; do
+  for path in "/opt/usr/apps/$package" "/opt/usr/home/owner/apps_rw/$package" "/opt/share/packages/$package.xml" "/opt/share/signatures/$package.txt"; do
+    [ ! -e "$path" ] || set -- "$@" "$path"
+  done
+done
+[ "$#" -eq 0 ] || tar czf "$backup/packages.tar.gz" "$@"
+sqlite3 "$backup/pkgmgr.db" 'PRAGMA integrity_check;' | grep -Fx ok
+sqlite3 "$backup/webapp.db" 'PRAGMA integrity_check;' | grep -Fx ok
+sha256sum "$backup"/* > "$backup/SHA256SUMS"
+chmod -R go-rwx "$backup"
+echo BACKUP=$backup
+""".strip()
+        output = self.root_command(command)
+        backup = next(
+            (line.partition("=")[2] for line in output.splitlines() if line.startswith("BACKUP=")),
+            "",
+        )
+        if not backup.startswith("/opt/usr/home/owner/share/daybreak-backups/installer-"):
+            raise InstallError("the TV backup did not return a valid path")
+        return backup
+
+    def install_assets(self) -> None:
+        for relative, remote_name in STAGED_FILES.items():
+            self.push(PROJECT / relative, f"{REMOTE_STAGE}/{remote_name}")
+        command = f"""
+set -eu
+stage={REMOTE_STAGE}
+guard={REMOTE_GUARD}
+mkdir -p "$guard/home-layout" "$guard/aster-home"
+cat "$stage/daybreak-boot-hook.sh" > "$guard/boot-hook.sh"
+cat "$stage/daybreak-root-enforce.sh" > "$guard/root-enforce.sh"
+cat "$stage/daybreak-FromSmarthubToFS.json" > "$guard/home-layout/FromSmarthubToFS.json"
+cat "$stage/daybreak-apps_recent_layer.json" > "$guard/home-layout/apps_recent_layer.json"
+cat "$stage/daybreak-tvplus-channel-denylist.tsv" > "$guard/tvplus-channel-denylist.tsv"
+cat "$stage/daybreak-aster-index.html" > "$guard/aster-home/index.html"
+cat "$stage/daybreak-aster-styles.css" > "$guard/aster-home/styles.css"
+cat "$stage/daybreak-aster-app.js" > "$guard/aster-home/app.js"
+cat "$stage/daybreak-aster-navigation.js" > "$guard/aster-home/navigation.js"
+cat "$stage/daybreak-aster-config.xml" > "$guard/aster-home/config.xml"
+cat "$stage/daybreak-aster-launcher-icon.png" > "$guard/aster-home/launcher-icon.png"
+chown -R root:root "$guard"
+chmod 755 "$guard" "$guard/home-layout" "$guard/aster-home" "$guard/boot-hook.sh" "$guard/root-enforce.sh"
+find "$guard/home-layout" "$guard/aster-home" -type f -exec chmod 644 {{}} \\;
+for file in "$guard/boot-hook.sh" "$guard/root-enforce.sh" "$guard/tvplus-channel-denylist.tsv"; do chsmack -a User "$file"; done
+sha256sum "$guard/boot-hook.sh" "$guard/root-enforce.sh"
+""".strip()
+        self.root_command(command)
+
+    def apply_policy(self) -> None:
+        output = self.root_command(
+            "DAYBREAK_INITIAL_DELAY_SECONDS=0 DAYBREAK_SETTLE_DELAY_SECONDS=0 "
+            "DAYBREAK_PASS_DELAY_SECONDS=0 "
+            f"sh -s<{REMOTE_GUARD}/root-enforce.sh; "
+            f"cat {REMOTE_GUARD}/root-status.log"
+        )
+        if "pass1_exit=0" not in output or "pass2_exit=0" not in output:
+            raise InstallError("the TV guard did not report a verified pass")
+
+    def capture_persistence_block(self) -> bytes:
+        command = (
+            f"dd if={PROFILE.root_device} bs={PROFILE.block_size} "
+            f"skip={PROFILE.system_conf_block} count=1 2>/dev/null | base64"
+        )
+        encoded = "".join(self.root_command(command).split())
+        try:
+            block = base64.b64decode(encoded, validate=True)
+        except ValueError as error:
+            raise InstallError("the TV returned an invalid persistence block") from error
+        if len(block) != PROFILE.block_size:
+            raise InstallError("the TV returned a truncated persistence block")
+        return block
+
+    def install_persistence(self) -> Path | None:
+        assert self.host is not None
+        original = self.capture_persistence_block()
+        patched = patch_persistence_block(original)
+        if digest(original) == PROFILE.patched_block_sha256:
+            self.say("The verified boot hook is already installed.")
+            return None
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        local_dir = LOCAL_BACKUP_ROOT / self.host / stamp
+        local_dir.mkdir(parents=True, exist_ok=False)
+        local_dir.chmod(0o700)
+        local_backup = local_dir / "system-conf-block.original.bin"
+        local_backup.write_bytes(original)
+        local_backup.chmod(0o600)
+        patched_path = local_dir / "system-conf-block.patched.bin"
+        patched_path.write_bytes(patched)
+        patched_path.chmod(0o600)
+        self.push(patched_path, f"{REMOTE_STAGE}/daybreak-system-conf-block.patched.bin")
+        command = f"""
+set -eu
+device={PROFILE.root_device}
+block={PROFILE.system_conf_block}
+size={PROFILE.block_size}
+source={REMOTE_STAGE}/daybreak-system-conf-block.patched.bin
+backup=/opt/usr/home/owner/share/daybreak-backups/system-conf-block-$stamp.original.bin
+[ "$(sha256sum "$source" | awk '{{print $1}}')" = "{PROFILE.patched_block_sha256}" ]
+dd if="$device" of="$backup" bs="$size" skip="$block" count=1 2>/dev/null
+[ "$(sha256sum "$backup" | awk '{{print $1}}')" = "{PROFILE.original_block_sha256}" ]
+chmod 600 "$backup"
+dd if="$source" of="$device" bs="$size" seek="$block" count=1 conv=notrunc,fsync 2>/dev/null
+sync
+actual=$(dd if="$device" bs="$size" skip="$block" count=1 2>/dev/null | sha256sum | awk '{{print $1}}')
+[ "$actual" = "{PROFILE.patched_block_sha256}" ]
+echo PATCHED=$actual
+echo TV_BACKUP=$backup
+""".strip()
+        output = self.root_command(command)
+        if f"PATCHED={PROFILE.patched_block_sha256}" not in output:
+            raise InstallError("the persistence write did not verify")
+        return local_backup
+
+    def write_config(self, backup: str, local_block: Path | None) -> None:
+        assert self.host is not None
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "tv_host": self.host,
+            "model": PROFILE.model,
+            "firmware": PROFILE.firmware,
+            "internal_build": PROFILE.build,
+            "root_executable": str(self.root_executable),
+            "sdb": str(self.sdb),
+            "tv_backup": backup,
+            "local_persistence_backup": str(local_block) if local_block else None,
+            "installed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        temporary = CONFIG_PATH.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        temporary.chmod(0o600)
+        temporary.replace(CONFIG_PATH)
+
+    def install(self) -> None:
+        self.check_local()
+        if self.arguments.check:
+            self.verify_root_transport()
+            self.say(f"Vendored root transport verified: {ROOT_TRANSPORT_VERSION}")
+            self.say(f"Supported TV: {PROFILE.model} / {PROFILE.firmware}")
+            return
+        self.show_plan()
+        if self.arguments.dry_run:
+            self.say("Dry run complete; no network or device action was performed.")
+            return
+        self.obtain_host()
+        total = 8
+        self.stage(1, total, "Verify the vendored root transport")
+        self.verify_root_transport()
+        self.stage(2, total, "Verify Developer Mode, model, firmware, and launcher base")
+        self.verify_target()
+        self.stage(3, total, "Create recovery backups on the TV")
+        backup = self.create_backup()
+        self.say(f"Backup verified at {backup}")
+        self.stage(4, total, "Install the guard and local launcher assets")
+        self.install_assets()
+        self.stage(5, total, "Apply and verify the debloat policy")
+        if not self.arguments.yes:
+            answer = input("  Apply the reviewed TU7000 changes now? [y/N] ").strip().lower()
+            if answer not in {"y", "yes"}:
+                raise InstallError("installation stopped before changing the TV")
+        self.apply_policy()
+        self.stage(6, total, "Install verified reboot persistence")
+        if not self.arguments.yes:
+            self.say("This writes one hash-pinned 4096-byte block and keeps two originals.")
+            answer = input("  Install reboot persistence now? [y/N] ").strip().lower()
+            if answer not in {"y", "yes"}:
+                raise InstallError("installation stopped before the persistence write")
+        local_block = self.install_persistence()
+        self.stage(7, total, "Save local configuration")
+        self.write_config(backup, local_block)
+        self.stage(8, total, "Reboot and inspect the physical TV")
+        self.say("Power-cycle the TV, wait two minutes, then run ./tools/tvctl status.")
+        self.say("Confirm streaming, HDMI-CEC, casting, Live TV/TV Plus, and ARC audio.")
+        self.say("Installation files and both backup locations are recorded in the config.")
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(description=__doc__)
+    result.add_argument("--check", action="store_true", help="check local installer readiness")
+    result.add_argument("--dry-run", action="store_true", help="show the installation plan only")
+    result.add_argument("--tv-host", type=validate_host, help="television IPv4 address")
+    result.add_argument("--root-executable", type=Path, help="use an existing samsung-tv-root release")
+    result.add_argument("--yes", action="store_true", help="accept reviewed gates non-interactively")
+    return result
+
+
+def main() -> int:
+    arguments = parser().parse_args()
+    try:
+        Installer(arguments).install()
+    except (InstallError, OSError, ValueError) as error:
+        print(f"\nInstallation stopped: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
